@@ -35,6 +35,7 @@ module.exports = {
               checked. If 0 then the cookie will be deleted on browser close. """
               type: "integer"
               default: 10 * 365 * 24 * 60 * 60 * 1000 #ten years
+          required: false
         logLevel:
           description: "The log level: debug, info, warn, error" 
           type: "string"
@@ -98,6 +99,7 @@ module.exports = {
               "
               type: "string"
               default: "ca/certs/cacert.crt"
+          required: false
         database:
           type: "object"
           properties:
@@ -107,7 +109,7 @@ module.exports = {
               enum: ["sqlite3", "mysql", "pg"]
               default: "sqlite3"
             ###
-            The connection setting is database client dependent. Some examples:
+            The connection setting depends on database client. Some examples:
             __sqlite3:__
 
                 {
@@ -130,7 +132,7 @@ module.exports = {
                 filename: "pimatic-database.sqlite"
               }
             deviceAttributeLogging:
-              description: "Time to keep logged device attributes values in database"
+              description: "Time to keep attribute values of logged devices in database"
               type: "array"
               default: [ 
                 { 
@@ -164,7 +166,7 @@ module.exports = {
             diskSyncInterval:
               description: "
                 Interval for writing logged entries to disk. If this value is smaller than 
-                the deleteExpiredInterval setting, than the value of it is used 
+                the deleteExpiredInterval setting, then the value of this setting is used 
                 instead. Should be a multiple of deleteExpiredInterval.
                 "
               type: "string"
@@ -190,6 +192,7 @@ module.exports = {
               """
               type: "boolean"
               default: false
+          required: false
     pages:
       description: "Array of GUI pages"
       type: "array"
@@ -239,6 +242,12 @@ module.exports = {
       description: "Array of plugins to load"
       type: "array"
       default: []
+      items:
+        type: "object"
+        properties:
+          plugin:
+            type: "string"
+        additionalProperties: true
     devices:
       description: "Array of device definitions"
       type: "array"
@@ -252,6 +261,7 @@ module.exports = {
             type: "string"
           class:
             type: "string"
+        additionalProperties: true
     rules:
       description: "Array of rules"
       type: "array"
@@ -310,7 +320,7 @@ module.exports = {
         type: "object"
         properties:
           username:
-            description: "The loginname of the user"
+            description: "The login name of the user"
             type: "string"
           password:
             description: "The password of the user"
@@ -441,6 +451,13 @@ module.exports = {
                 type: "string"
                 default: "none"
                 enum: ["none", "read", "write"]
+              database:
+                description: """
+                Allow read and or write to the database
+                """
+                type: "string"
+                default: "none"
+                enum: ["none", "read", "write"]
               controlDevices:
                 description: """
                 Allow to control devices (switches, buttons, ...)
@@ -453,4 +470,9 @@ module.exports = {
                 """
                 type: "boolean"
                 default: false
+  patternProperties:
+    '//.*': {
+      description: "Comments"
+      type: "string"
+    }
 }
