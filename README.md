@@ -1,17 +1,11 @@
 pimatic
 =======
-
-[![Build Status](https://travis-ci.org/pimatic/pimatic.png?branch=master)](https://travis-ci.org/pimatic/pimatic)
-[![NPM version](https://img.shields.io/npm/v/pimatic.png)](http://badge.fury.io/js/pimatic)
-[![Mentioned in Awesome SmartHome](https://awesome.re/mentioned-badge.svg)](https://github.com/pfalcon/awesome-smarthome#notable-opensource-projects)
-
+*ABOUT THIS FORK: Please do not use this fork for your environment, it is a personalized version for me and my special use case and development*
 
 pimatic is a home automation framework that runs on [node.js](http://nodejs.org). It provides a 
 common extensible platform for home control and automation tasks.  
 
 Read more at [pimatic.org](http://pimatic.org/) or visit the [forum](http://forum.pimatic.org).
-
-[![Join the chat at https://gitter.im/pimatic/pimatic](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/pimatic/pimatic?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 Screenshots
 -----------
