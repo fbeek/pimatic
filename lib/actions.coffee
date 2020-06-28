@@ -6,7 +6,7 @@ The Action Handler offers a `executeAction` method to execute the action.
 For actions and rule explanations take a look at the [rules file](rules.html).
 ###
 
-__ = require("i18n").__
+__ = require("i18n-pimatic").__
 Promise = require 'bluebird'
 assert = require 'cassert'
 _ = require('lodash')
@@ -37,7 +37,7 @@ module.exports = (env) ->
   The base class for all Action Handler. If you want to provide actions in your plugin then 
   you should create a sub class that implements a `executeAction` function.
   ###
-  class ActionHandler
+  class ActionHandler extends require('events').EventEmitter
 
     # ### executeAction()
     ###
@@ -45,7 +45,7 @@ module.exports = (env) ->
     done or would be done.
 
     If `simulate` is `true` the Action Handler should not execute the action. It should just
-    return a promise fulfilled with a descrbing string like "would _..._".
+    return a promise fulfilled with a descriptive string like "would _..._".
 
     Take a look at the Log Action Handler for a simple example.
     ###
@@ -54,10 +54,42 @@ module.exports = (env) ->
 
     hasRestoreAction: => no
 
+    setup: -> 
+      # You must overwrite this method and set up your listener here.
+      # You should call super() after that.
+      if @_setupCalled then throw new Error("Setup already called!")
+      @_setupCalled = yes
+
+    destroy: -> 
+      # You must overwrite this method and remove your listener here.
+      # You should call super() after that.
+      unless @_setupCalled then throw new Error("Destroy called, but setup was not called!")
+      delete @_setupCalled
+      @emit "destroy"
+      @removeAllListeners()
+
     executeRestoreAction: (simulate) =>
       throw new Error(
         "executeRestoreAction must be implemented when hasRestoreAction returns true"
-      )  
+      )
+
+    dependOnDevice: (device) ->
+      recreateEmitter = (=> @emit "recreate")
+      device.on "changed", recreateEmitter
+      device.on "destroyed", recreateEmitter
+      @on 'destroy', =>
+        device.removeListener "changed", recreateEmitter
+        device.removeListener "destroyed", recreateEmitter
+
+    dependOnVariable: (variableManager, varName) ->
+      recreateEmitter = ( (variable) => 
+        if variable.name isnt varName
+          return
+        @emit "recreate"
+      )
+      variableManager.on "variableRemoved", recreateEmitter
+      @on 'destroy', =>
+        variableManager.removeListener "variableRemoved", recreateEmitter
 
   ###
   The Log Action Provider
@@ -167,6 +199,10 @@ module.exports = (env) ->
 
     constructor: (@framework, @variableName, @rightTokens) ->
 
+    setup: ->
+      @dependOnVariable(@framework.variableManager, @variableName)
+      super()
+
     executeAction: (simulate, context) ->
       if simulate
         # just return a promise fulfilled with a description about what we would do.
@@ -232,10 +268,14 @@ module.exports = (env) ->
 
     constructor: (@device, @state) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     ###
     Handles the above actions.
     ###
-    _doExectuteAction: (simulate, state) =>
+    _doExecuteAction: (simulate, state) =>
       return (
         if simulate
           if state then Promise.resolve __("would set presence of %s to present", @device.name)
@@ -248,11 +288,11 @@ module.exports = (env) ->
       )
 
     # ### executeAction()
-    executeAction: (simulate) => @_doExectuteAction(simulate, @state)
+    executeAction: (simulate) => @_doExecuteAction(simulate, @state)
     # ### hasRestoreAction()
     hasRestoreAction: -> yes
     # ### executeRestoreAction()
-    executeRestoreAction: (simulate) => @_doExectuteAction(simulate, (not @state))
+    executeRestoreAction: (simulate) => @_doExecuteAction(simulate, (not @state))
 
   ###
   The open/close ActionProvider
@@ -303,10 +343,14 @@ module.exports = (env) ->
 
     constructor: (@device, @state) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     ###
     Handles the above actions.
     ###
-    _doExectuteAction: (simulate, state) =>
+    _doExecuteAction: (simulate, state) =>
       return (
         if simulate
           if state then Promise.resolve __("would set contact %s to closed", @device.name)
@@ -319,11 +363,11 @@ module.exports = (env) ->
       )
 
     # ### executeAction()
-    executeAction: (simulate) => @_doExectuteAction(simulate, @state)
+    executeAction: (simulate) => @_doExecuteAction(simulate, @state)
     # ### hasRestoreAction()
     hasRestoreAction: -> yes
     # ### executeRestoreAction()
-    executeRestoreAction: (simulate) => @_doExectuteAction(simulate, (not @state))
+    executeRestoreAction: (simulate) => @_doExecuteAction(simulate, (not @state))
 
         
   ###
@@ -404,10 +448,14 @@ module.exports = (env) ->
 
     constructor: (@device, @state) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     ###
     Handles the above actions.
     ###
-    _doExectuteAction: (simulate, state) =>
+    _doExecuteAction: (simulate, state) =>
       return (
         if simulate
           if state then Promise.resolve __("would turn %s on", @device.name)
@@ -418,11 +466,11 @@ module.exports = (env) ->
       )
 
     # ### executeAction()
-    executeAction: (simulate) => @_doExectuteAction(simulate, @state)
+    executeAction: (simulate) => @_doExecuteAction(simulate, @state)
     # ### hasRestoreAction()
     hasRestoreAction: -> yes
     # ### executeRestoreAction()
-    executeRestoreAction: (simulate) => @_doExectuteAction(simulate, (not @state))
+    executeRestoreAction: (simulate) => @_doExecuteAction(simulate, (not @state))
 
   ###
   The Toggle Action Provider
@@ -488,6 +536,10 @@ module.exports = (env) ->
   class ToggleActionHandler extends ActionHandler
 
     constructor: (@device) -> #nop
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     # ### executeAction()
     executeAction: (simulate) => 
@@ -562,6 +614,10 @@ module.exports = (env) ->
     constructor: (@device, @buttonId) ->
       assert @device? and @device instanceof env.devices.ButtonsDevice
       assert @buttonId? and typeof @buttonId is "string"
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     ###
     Handles the above actions.
@@ -649,6 +705,10 @@ module.exports = (env) ->
 
     constructor: (@device, @position) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     # ### executeAction()
     executeAction: (simulate) => 
       return (
@@ -721,6 +781,10 @@ module.exports = (env) ->
 
     constructor: (@device) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     # ### executeAction()
     executeAction: (simulate) => 
       return (
@@ -786,10 +850,10 @@ module.exports = (env) ->
           assert(not isNaN(value))
           value = parseFloat(value)
           if value < 0.0
-            context?.addError("Can't dim to a negativ dimlevel.")
+            context?.addError("Can't dim to a negative dimlevel.")
             return
           if value > 100.0
-            context?.addError("Can't dim to greaer than 100%.")
+            context?.addError("Can't dim to greater than 100%.")
             return
         return {
           token: match
@@ -804,6 +868,10 @@ module.exports = (env) ->
     constructor: (@framework, @device, @valueTokens) ->
       assert @device?
       assert @valueTokens?
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     _clampVal: (value) ->
       assert(not isNaN(value))
@@ -826,10 +894,12 @@ module.exports = (env) ->
 
     # ### executeAction()
     executeAction: (simulate) => 
-      @framework.variableManager.evaluateNumericExpression(@valueTokens).then( (value) =>
-        value = @_clampVal value
-        @lastValue = value
-        return @_doExecuteAction(simulate, value)
+      @device.getDimlevel().then( (lastValue) =>
+        @lastValue = lastValue or 0
+        return @framework.variableManager.evaluateNumericExpression(@valueTokens).then( (value) =>
+          value = @_clampVal value
+          return @_doExecuteAction(simulate, value)
+        )
       )
 
     # ### hasRestoreAction()
@@ -900,6 +970,10 @@ module.exports = (env) ->
       assert @device?
       assert @valueTokens?
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     ###
     Handles the above actions.
     ###
@@ -969,7 +1043,7 @@ module.exports = (env) ->
           assert(not isNaN(value))
           value = parseFloat(value)
           if value < 0.0
-            context?.addError("Can't set temp to a negativ value.")
+            context?.addError("Can't set temp to a negative value.")
             return
           if value > 32.0
             context?.addError("Can't set temp higher than 32°C.")
@@ -988,13 +1062,9 @@ module.exports = (env) ->
       assert @device?
       assert @valueTokens?
 
-    # _clampVal: (value) ->
-    #   assert(not isNaN(value))
-    #   return (switch
-    #     when value > 32 then 32
-    #     when value < 0 then 0
-    #     else value
-    #   )
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     ###
     Handles the above actions.
@@ -1086,6 +1156,10 @@ module.exports = (env) ->
 
     constructor: (@device, @action) ->
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     # ### executeAction()
     executeAction: (simulate) => 
       return (
@@ -1139,6 +1213,10 @@ module.exports = (env) ->
 
     constructor: (@device) -> #nop
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     executeAction: (simulate) => 
       return (
         if simulate
@@ -1190,6 +1268,10 @@ module.exports = (env) ->
 
     constructor: (@device) -> #nop
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     executeAction: (simulate) => 
       return (
         if simulate
@@ -1238,6 +1320,10 @@ module.exports = (env) ->
   class AVPlayerPlayActionHandler extends ActionHandler
 
     constructor: (@device) -> #nop
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     executeAction: (simulate) => 
       return (
@@ -1294,7 +1380,7 @@ module.exports = (env) ->
         assert typeof match is "string"
         value = parseFloat(value)
         if value < 0.0
-          context?.addError("Can't change volume to a negativ value.")
+          context?.addError("Can't change volume to a negative value.")
           return
         if value > 100.0
           context?.addError("Can't change volume to greater than 100%.")
@@ -1310,6 +1396,10 @@ module.exports = (env) ->
   class AVPlayerVolumeActionHandler extends ActionHandler
 
     constructor: (@framework, @device, @valueTokens) -> #nop
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     executeAction: (simulate, value) => 
       return (
@@ -1367,6 +1457,10 @@ module.exports = (env) ->
   class AVPlayerNextActionHandler extends ActionHandler
     constructor: (@device) -> #nop
 
+    setup: ->
+      @dependOnDevice(@device)
+      super()
+
     executeAction: (simulate) => 
       return (
         if simulate
@@ -1418,6 +1512,10 @@ module.exports = (env) ->
         
   class AVPlayerPrevActionHandler extends ActionHandler
     constructor: (@device) -> #nop
+
+    setup: ->
+      @dependOnDevice(@device)
+      super()
 
     executeAction: (simulate) => 
       return (

@@ -11,7 +11,7 @@ util = require 'util'
 assert = require 'cassert'
 byline = require 'byline'
 _ = require 'lodash'
-spawn = require("cross-spawn").spawn
+spawn = require("cross-spawn")
 https = require "https"
 semver = require "semver"
 events = require 'events'
@@ -19,6 +19,7 @@ S = require 'string'
 declapi = require 'decl-api'
 rp = require 'request-promise'
 download = require 'gethub'
+blacklist = require '../blacklist.json'
 
 module.exports = (env) ->
 
@@ -38,6 +39,7 @@ module.exports = (env) ->
       if isCompatible(refVersion, value)
         versions.push key
     )
+    
     return versions
 
   getLatestCompatible = (packageInfo, refVersion) ->
@@ -59,30 +61,27 @@ module.exports = (env) ->
     plugins: []
     updateProcessStatus: 'idle'
     updateProcessMessages: []
+    restartRequired: false
 
     constructor: (@framework) ->
       @modulesParentDir = path.resolve @framework.maindir, '../../'
 
     checkNpmVersion: () ->
-      @spawnNpm(['--version']).then( (result) =>
-        version = result.trim()
-        unless semver.satisfies(version, '<3')
-          env.logger.warn(
-            "pimatic needs npm version 2, your version is #{version}, run \"npm install -g npm@2\"."
-          )
-      ).catch( (err) =>
-        env.logger.warn("Could not run npm, plugin and module installation will not work.")
+      @spawnPpm(['--version']).catch( (err) =>
+        env.logger.error("Could not run ppm, plugin and module installation will not work.")
       )
 
     # Loads the given plugin by name
-    loadPlugin: (name) ->
+    loadPlugin: (name, config) ->
       packageInfo = @getInstalledPackageInfo(name)
       packageInfoStr = (if packageInfo? then "(" + packageInfo.version  + ")" else "")
       env.logger.info("""Loading plugin: "#{name}" #{packageInfoStr}""")
       # require the plugin and return it
       # create a sublogger:
       pluginEnv = Object.create(env)
-      pluginEnv.logger = env.logger.base.createSublogger(name)
+      pluginEnv.logger = env.logger.base.createSublogger(name, config.debug)
+      if config.debug
+        env.logger.debug("debug is true in plugin config, showing debug output for #{name}.")
       plugin = (require name) pluginEnv, module
       return Promise.resolve([plugin, packageInfo])
 
@@ -125,18 +124,24 @@ module.exports = (env) ->
           )
           env.logger.info("Installing: \"#{name}\" from npm-registry.")
           if update
-            return @spawnNpm(['update', name, '--unsafe-perm'])
+            return @spawnPpm(['update', name, '--unsafe-perm'])
           else
-            return @spawnNpm(['install', name, '--unsafe-perm'])
+            return @spawnPpm(['install', name, '--unsafe-perm'])
         dist = @_findDist(packageInfo)
         if dist
           return if update then @updateGitPlugin(name) else @installGitPlugin(name)
-        env.logger.info("Installing: \"#{name}@#{packageInfo.version}\" from npm-registry.")
-        return @spawnNpm(['install', "#{name}@#{packageInfo.version}", '--unsafe-perm'])
+        plugin = "#{packageInfo.name}@#{packageInfo.version}"
+        env.logger.info("Installing: \"#{plugin}\" from npm-registry.")
+        return @spawnPpm(['install', "#{plugin}", '--unsafe-perm'])
       )
 
     updatePlugin: (name) ->
       return @installPlugin(name, true)
+
+    uninstallPlugin: (name) ->
+      pluginDir = @pathToPlugin(name)
+      @requrieRestart()
+      return fs.rmrfAsync(pluginDir)
 
     _emitUpdateProcessStatus: (status, info) ->
       @updateProcessStatus = status
@@ -152,19 +157,21 @@ module.exports = (env) ->
         messages: @updateProcessMessages
       }
 
-    update: (modules) ->
+    install: (modules) ->
       info = {modules}
       @_emitUpdateProcessStatus('running', info)
-      npmMessageListener = ( (line) => @_emitUpdateProcessMessage(line, info); )
+      npmMessageListener = ( (line) => @_emitUpdateProcessMessage(line, info) )
       @on 'npmMessage', npmMessageListener
       hasErrors = false
       return Promise.each(modules, (plugin) =>
-        @updatePlugin(plugin).catch( (error) =>
-          env.logger.error("Error Updating plugin #{plugin}: #{error.message}")
+        (if @isInstalled(plugin) then @updatePlugin(plugin) else @installPlugin(plugin))
+        .catch( (error) =>
+          env.logger.error("Error installing plugin #{plugin}: #{error.message}")
           env.logger.debug(error.stack)
         )
       ).then( =>
         @_emitUpdateProcessStatus('done', info)
+        @requrieRestart()
         @removeListener 'npmMessage', npmMessageListener
         return modules
       ).catch( (error) =>
@@ -176,7 +183,8 @@ module.exports = (env) ->
     pathToPlugin: (name) ->
       assert name?
       assert name.match(/^pimatic.*$/)? or name is "pimatic"
-      return path.resolve @framework.maindir, "..", name
+      pluginName = @extractPluginName(name)
+      return path.resolve @framework.maindir, "..", pluginName
 
     getPluginList: ->
       if @_pluginList then return @_pluginList
@@ -186,24 +194,71 @@ module.exports = (env) ->
       if @_coreInfo then return @_coreInfo
       else return @searchForCoreUpdate()
 
+    extractPluginName: (name) ->
+      versionInfo = @getSpecificVersionInfo(name)
+      return if versionInfo? then versionInfo.name else name
+
+    getSpecificVersionInfo: (name) ->
+      if match = /^(pimatic.*)@(.*)$/.exec(name)
+        return {
+          name: match[1]
+          version: match[2]
+        }
+
+    _tranformRequestErrors: (err) ->
+      if err.name is 'RequestError'
+        throw new Error(
+          """
+          Could not connect to the pimatic update server: #{err.message}
+          Either the update server is currently not available or your internet connection is down.
+          """)
+      throw err
+
+
     searchForPlugin: ->
-      return @_pluginList = rp('http://api.pimatic.org/plugins').then( (res) =>
-        json = JSON.parse(res)
-        # cache for 1min
-        setTimeout( (=> @_pluginList = null), 60*1000)
-        return json
-      )
+      version = @framework.packageJson.version
+      return @_pluginList = rp("http://api.pimatic.org/plugins?version=#{version}")
+        .catch(@_tranformRequestErrors)
+        .then( (res) =>
+          json = JSON.parse(res)
+          if json.error?
+            throw new Error ("#{json.error}: #{version}")
+          
+          for name in blacklist
+            json = json.filter (item) -> item.name isnt name
+          
+          # Filter packages based on Node compatibility
+          json = json.filter (p) => @isNodeVersionCompatible(p.engines?.node)
+          
+          # sort
+          json.sort( (a, b) => a.name.localeCompare(b.name) )
+          # cache for 1min
+          setTimeout( (=> @_pluginList = null), 60*1000)
+          return json
+        ).catch( (err) =>
+          # cache errors only for 1 sec
+          setTimeout( (=> @_pluginList = null), 1*1000)
+          throw err
+        )
 
     searchForCoreUpdate: ->
-      return @_coreInfo = rp('http://api.pimatic.org/core').then( (res) =>
-        json = JSON.parse(res)
-        # cache for 1min
-        setTimeout( (=> @_coreInfo = null), 60*1000)
-        return json
-      )
+      version = @framework.packageJson.version
+      return @_coreInfo = rp("http://api.pimatic.org/core?version=#{version}")
+        .catch(@_tranformRequestErrors)
+        .then( (res) =>
+          json = JSON.parse(res)
+          # cache for 1min
+          setTimeout( (=> @_coreInfo = null), 60*1000)
+          return json
+        ).catch( (err) =>
+          # cache errors only for 1 sec
+          setTimeout( (=> @_coreInfo = null), 1*1000)
+          throw err
+        )
 
     getPluginInfo: (name) ->
       return @getCoreInfo() if name is "pimatic"
+      return Promise.resolve(@getSpecificVersionInfo(name)) if name.match(/^pimatic.*@.*$/)
       pluginInfo = null
       return @getPluginList().then( (plugins) =>
         pluginInfo = _.find(plugins, (p) -> p.name is name)
@@ -211,7 +266,7 @@ module.exports = (env) ->
         unless pluginInfo?
           env.logger.info("Could not get plugin info from update server, request info from npm")
           return pluginInfo = @getPluginInfoFromNpm(name)
-      ).then( () =>
+      ).then( () =>  
         return pluginInfo
       )
 
@@ -219,10 +274,26 @@ module.exports = (env) ->
       return rp("https://registry.npmjs.org/#{name}").then( (res) =>
         packageInfos = JSON.parse(res)
         if packageInfos.error?
-          throw new Error("Error getting info about #{name} from npm failed: #{info.reason}")
+          throw new Error(
+            "Error getting info about #{name} from npm failed: #{packageInfos.reason}")
         return getLatestCompatible(packageInfos, @framework.packageJson.version)
       )
 
+    isCompatible: (packageInfo) ->
+      version = @framework.packageJson.version
+      pimaticRange = packageInfo.peerDependencies?.pimatic
+      unless pimaticRange
+        return null
+      return semver.satisfies(version, pimaticRange)
+    
+    isNodeVersionCompatible: (version) ->
+      # No node attribute in package for downward compat purposes
+      # as not all maintainers have included { engines: { node: "x.x.x" }} in package.json
+      !version || semver.satisfies(@getInstalledNodeVersion(), version)
+    
+    getInstalledNodeVersion: () ->
+      return "#{process.versions.node}"
+    
     searchForPluginsWithInfo: ->
       return @searchForPlugin().then( (plugins) =>
         return pluginList = (
@@ -239,8 +310,10 @@ module.exports = (env) ->
               description: p.description
               version: p.version
               installed: installed
-              active: loadedPlugin?
+              loaded: loadedPlugin?
+              activated: @isActivated(name)
               isNewer: (if installed then semver.gt(p.version, packageJson.version) else false)
+              isCompatible: @isCompatible(p)
             }
         )
       )
@@ -260,7 +333,7 @@ module.exports = (env) ->
       return @getInstalledPluginUpdateVersions().then( (result) =>
         outdated = []
         for p in result
-          if semver.gt(p.latest, p.current)
+          if semver.gt(p.latest, p.current) and @isNodeVersionCompatible(p.node)
             outdated.push p
         return outdated
       )
@@ -277,6 +350,7 @@ module.exports = (env) ->
                 plugin: p
                 current: installed.version
                 latest: latest.version
+                node: latest.engines?.node # Add node engine from updated package to check later
               }
             )
         return Promise.settle(waiting).then( (results) =>
@@ -295,18 +369,25 @@ module.exports = (env) ->
         )
       )
 
-    spawnNpm: (args) ->
+    spawnPpm: (args) ->
       return new Promise( (resolve, reject) =>
         if @npmRunning
           reject "npm is currently in use"
           return
         @npmRunning = yes
         output = ''
-        npmLogger = env.logger.createSublogger("npm")
+        npmLogger = env.logger.createSublogger("ppm")
+        errCode = null
+        errorMessage = null
         onLine = ( (line) =>
           line = line.toString()
+          if (match = line.match(/ERR! code (E[A-Z]+)/))?
+            errCode = match[1]
+          if (match = line.match(/error .* requires a C\+\+11 compiler/))?
+            errorMessage = match[0]
           output += "#{line}\n"
           if line.indexOf('npm http 304') is 0 then return
+          if line.match(/ERR! peerinvalid .*/) then return
           @emit "npmMessage", line
           line = S(line).chompLeft('npm ').s
           npmLogger.info line
@@ -314,7 +395,8 @@ module.exports = (env) ->
         npmEnv = _.clone(process.env)
         npmEnv['HOME'] = require('path').resolve @framework.maindir, '../..'
         npmEnv['NPM_CONFIG_UNSAFE_PERM'] = true
-        npm = spawn('npm', args, {cwd: @modulesParentDir, env: npmEnv})
+        ppmBin = './node_modules/pimatic/ppm.js'
+        npm = spawn(ppmBin, args, {cwd: @modulesParentDir, env: npmEnv})
         stdout = byline(npm.stdout)
         stdout.on "data", onLine
         stderr = byline(npm.stderr)
@@ -322,9 +404,11 @@ module.exports = (env) ->
 
         npm.on "close", (code) =>
           @npmRunning = no
-          command = "npm " + _.reduce(args, (akk, a) -> "#{akk} #{a}")
+          command = ppmBin + " " + _.reduce(args, (akk, a) -> "#{akk} #{a}")
           if code isnt 0
-            reject new Error("Error running \"#{command}\"")
+            reject new Error(
+              "Error running \"#{command}\"" + (if errorMessage? then ": #{errorMessage}" else "")
+            )
           else resolve(output)
 
       )
@@ -358,7 +442,8 @@ module.exports = (env) ->
 
     getInstalledPlugins: ->
       return fs.readdirAsync("#{@framework.maindir}/..").then( (files) =>
-        return plugins = (f for f in files when f.match(/^pimatic-.*/)?)
+        return plugins =
+          (f for f in files when f.match(/^pimatic-.*/)? and f isnt "pimatic-plugin-commons")
       )
 
     getInstalledPluginsWithInfo: ->
@@ -370,10 +455,12 @@ module.exports = (env) ->
             loadedPlugin = @framework.pluginManager.getPlugin name
             listEntry = {
               name: name
-              active: loadedPlugin?
+              loaded: loadedPlugin?
+              activated: @isActivated(name)
               description: packageJson.description
               version: packageJson.version
               homepage: packageJson.homepage
+              isCompatible: @isCompatible(packageJson)
             }
         )
       )
@@ -381,7 +468,7 @@ module.exports = (env) ->
     installUpdatesAsync: (modules) ->
       return new Promise( (resolve, reject) =>
         # resolve when complete
-        @update(modules).then(resolve).catch(reject)
+        @install(modules).then(resolve).catch(reject)
         # or after 10 seconds to prevent a timeout
         Promise.delay('still running', 10000).then(resolve)
       )
@@ -431,30 +518,18 @@ module.exports = (env) ->
                 else
                   @installPlugin(fullPluginName)
               ).then( =>
-                return @loadPlugin(fullPluginName).then( ([plugin, packageInfo]) =>
+                pluginName = @extractPluginName(fullPluginName)
+                return @loadPlugin(pluginName, pConf).then( ([plugin, packageInfo]) =>
                   # Check config
-                  if packageInfo.configSchema?
-                    pathToSchema = path.resolve(
-                      @pathToPlugin(fullPluginName),
-                      packageInfo.configSchema
-                    )
-                    configSchema = require(pathToSchema)
-                    unless configSchema._normalized
-                      configSchema.properties.plugin = {
-                        type: "string"
-                      }
-                      configSchema.properties.active = {
-                        type: "boolean"
-                        required: false
-                      }
-                      @framework._normalizeScheme(configSchema)
-                    if typeof plugin.prepareConfig is "function"
-                      plugin.prepareConfig(pConf)
-                    @framework._validateConfig(pConf, configSchema, "config of #{fullPluginName}")
+                  configSchema = @_getConfigSchemaFromPackageInfo(packageInfo)
+                  if typeof plugin.prepareConfig is "function"
+                    plugin.prepareConfig(pConf)
+                  if configSchema?
+                    @framework._validateConfig(pConf, configSchema, "config of #{pluginName}")
                     pConf = declapi.enhanceJsonSchemaWithDefaults(configSchema, pConf)
                   else
                     env.logger.warn(
-                      "package.json of \"#{fullPluginName}\" has no \"configSchema\" property. " +
+                      "package.json of \"#{pluginName}\" has no \"configSchema\" property. " +
                       "Could not validate config."
                     )
                   @registerPlugin(plugin, pConf, configSchema)
@@ -462,12 +537,31 @@ module.exports = (env) ->
               )
             )
           ).catch( (error) ->
-            # If an error occures log an ignore it.
+            # If an error occurs log an ignore it.
             env.logger.error error.message
             env.logger.debug error.stack
           )
 
       return chain
+
+    _getConfigSchemaFromPackageInfo: (packageInfo) ->
+      unless packageInfo.configSchema?
+        return null
+      pathToSchema = path.resolve(
+        @pathToPlugin(packageInfo.name),
+        packageInfo.configSchema
+      )
+      configSchema = require(pathToSchema)
+      unless configSchema._normalized
+        configSchema.properties.plugin = {
+          type: "string"
+        }
+        configSchema.properties.active = {
+          type: "boolean"
+          required: false
+        }
+        @framework._normalizeScheme(configSchema)
+      return configSchema
 
     initPlugins: ->
       for plugin in @plugins
@@ -495,21 +589,68 @@ module.exports = (env) ->
         if p.config.plugin is name then return p.plugin
       return null
 
-    addPluginsToConfig: (plugins) ->
-      Array.isArray pluginNames
-      pluginNames = (p.plugin for p in @pluginsConfig)
-      added = []
-      for p in plugins
-        unless p in pluginNames
-          @pluginsConfig.push {plugin: p}
-          added.push p
-      @framework.saveConfig()
-      return added
+    getPluginConfig: (name) ->
+      for plugin in @framework.config.plugins
+        if plugin.plugin is name then return plugin
+      return null
 
-    removePluginsFromConfig: (plugins) ->
-      removed = _.remove(@pluginsConfig, (p) -> p.plugin in plugins)
-      @framework.saveConfig()
-      return removed
+    isActivated: (name) ->
+      for plugin in @framework.config.plugins
+        if plugin.plugin is name
+          return if plugin.active? then plugin.active else true
+      return false
+
+    getPluginConfigSchema: (name) ->
+      assert name?
+      assert typeof name is "string"
+      packageInfo = @getInstalledPackageInfo(name)
+      return @_getConfigSchemaFromPackageInfo(packageInfo)
+
+    updatePluginConfig: (pluginName, config) ->
+      assert pluginName?
+      assert typeof pluginName is "string"
+      config.plugin = pluginName
+      fullPluginName = "pimatic-#{pluginName}"
+      configSchema = @getPluginConfigSchema(fullPluginName)
+      if configSchema?
+        @framework._validateConfig(config, configSchema, "config of #{fullPluginName}")
+      for plugin, i in @framework.config.plugins
+        if plugin.plugin is pluginName
+          @framework.config.plugins[i] = config
+          @framework.emit 'config'
+          return
+      @framework.config.plugins.push(config)
+      @framework.emit 'config'
+
+    removePluginFromConfig: (pluginName) ->
+      removed = _.remove(@framework.config.plugins, (p) => p.plugin is pluginName)
+      if removed.length > 0
+        @framework.emit 'config'
+      return removed.length > 0
+
+    setPluginActivated: (pluginName, active) ->
+      for plugin, i in @framework.config.plugins
+        if plugin.plugin is pluginName
+          if !!plugin.active isnt !!active
+            @requrieRestart()
+          plugin.active = active
+          @framework.emit 'config'
+          return true
+      return false
+
+    getCallingPlugin: () ->
+      stack = new Error().stack.toString()
+      matches = stack.match(/^.+?\/node_modules\/(pimatic-.+?)\//m)
+      if matches?
+        return matches[1]
+      else
+        return 'pimatic'
+
+    requrieRestart: () ->
+      @restartRequired = true
+
+    doesRequireRestart: () ->
+      return @restartRequired
 
 
   class Plugin extends require('events').EventEmitter

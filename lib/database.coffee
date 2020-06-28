@@ -47,11 +47,17 @@ module.exports = (env) ->
   class Database extends require('events').EventEmitter
 
     constructor: (@framework, @dbSettings) ->
+      super()
 
     init: () ->
       connection = _.clone(@dbSettings.connection)
-      if @dbSettings.client is 'sqlite3' and connection.filename isnt ':memory:'
-        connection.filename = path.resolve(@framework.maindir, '../..', connection.filename)
+      if @dbSettings.client is 'sqlite3'
+        (
+          if connection.filename is ':memory:'
+            connection.filename = 'file::memory:?cache=shared'
+          else
+            connection.filename = path.resolve(@framework.maindir, '../..', connection.filename)
+        )
 
       pending = Promise.resolve()
 
@@ -63,7 +69,11 @@ module.exports = (env) ->
         env.logger.info(
           "Installing database package #{dbPackageToInstall}, this can take some minutes"
         )
-        pending = @framework.pluginManager.spawnNpm(['install', dbPackageToInstall])
+        if dbPackageToInstall is "sqlite3"
+          dbPackageToInstall = "sqlite3@4.0.9"
+        pending = @framework.pluginManager.spawnPpm(
+          ['install', dbPackageToInstall, '--unsafe-perm']
+        )
 
       return pending.then( =>
         @knex = Knex(
@@ -72,6 +82,7 @@ module.exports = (env) ->
           pool:
             min: 1
             max: 1
+          useNullAsDefault: true
         )
 
         @framework.on('destroy', (context) =>
@@ -108,7 +119,8 @@ module.exports = (env) ->
       ).then( =>
         # Save log-messages
         @framework.on("messageLogged", @messageLoggedListener = ({level, msg, meta}) =>
-          @saveMessageEvent(meta.timestamp, level, meta.tags, msg).done()
+          if meta?.timestamp and meta.tags?
+            @saveMessageEvent(meta.timestamp, level, meta.tags, msg).done()
         )
 
         # Save device attribute changes
@@ -380,7 +392,7 @@ module.exports = (env) ->
         i--
 
 
-     getDeviceAttributeLoggingTime: (deviceId, attributeName, type, discrete) ->
+    getDeviceAttributeLoggingTime: (deviceId, attributeName, type, discrete) ->
       expireMs = 0
       expire = "0"
       intervalMs = 0
@@ -503,7 +515,7 @@ module.exports = (env) ->
           tableName = dbMapping.typeToAttributeTable(info.type)
           timestamp = time.getTime()
           if info.expireMs is 0
-            # value expires immediatly
+            # value expires immediately
             doInsert = false
           else
             if info.intervalMs is 0 or timestamp - info.lastInsertTime > info.intervalMs
@@ -896,7 +908,7 @@ module.exports = (env) ->
           return Promise.resolve(query).then( (result) =>
             timeDiff = new Date().getTime()-time
             if @dbSettings.debug
-              env.logger.debug("quering #{result.length} events took #{timeDiff}ms.")
+              env.logger.debug("querying #{result.length} events took #{timeDiff}ms.")
             if info.type is "boolean"
               for r in result
                 # convert numeric or string value from db to boolean

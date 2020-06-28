@@ -26,7 +26,7 @@ class AddExpression extends Expression
     rightUnit = @right.getUnit()
     if leftUnit?
       return leftUnit
-     else
+    else
       return rightUnit
 
 class SubExpression extends Expression
@@ -41,7 +41,7 @@ class SubExpression extends Expression
     rightUnit = @right.getUnit()
     if leftUnit? and leftUnit.length > 0
       return leftUnit
-     else
+    else
       return rightUnit
 
 class MulExpression extends Expression
@@ -106,7 +106,10 @@ class VariableExpression extends Expression
         )
     ).then( (val) =>
       if expectNumeric
-        numVal = parseFloat(val)
+        if val isnt null
+          numVal = parseFloat(val)
+        else
+          numVal = 0
         if isNaN(numVal) 
           throw new Error("Expected variable #{@variable.name} to have a numeric value.")
         return numVal
@@ -120,7 +123,7 @@ class FunctionCallExpression extends Expression
   constructor: (@name, @func, @args) -> #nop
   evaluate: (cache) ->
     context = {
-      units: _.map(@args, (a) -> a.getUnit() ) 
+      units: _.map(@args, (a) -> a.getUnit() )
     }
     return Promise
       .map(@args, ( (a) -> a.evaluate(cache) ), {concurrency: 1})
@@ -149,6 +152,7 @@ class StringConcatExpression extends Expression
       @right.evaluate(cache).then( (val2) => "#{val1}#{val2}" )
     )
   toString: -> "con(#{@left.toString()}, #{@right.toString()})"
+  getUnit: -> null
 
 class ExpressionTreeBuilder
   constructor: (@variables, @functions) -> 

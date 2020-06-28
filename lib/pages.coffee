@@ -1,6 +1,6 @@
 
 
-__ = require("i18n").__
+__ = require("i18n-pimatic").__
 Promise = require 'bluebird'
 assert = require 'cassert'
 _ = require('lodash')
@@ -67,14 +67,22 @@ module.exports = (env) ->
       @framework._emitPageChanged(page)
       return page
 
+    removeDeviceFromAllPages: (deviceId) ->
+      for page in @pages
+        removed = _.remove(page.devices, {deviceId: deviceId})
+        if removed.length > 0
+          @framework._emitPageChanged(page)
+      @framework.saveConfig()
+
     removePage: (id, page) ->
       removedPage = _.remove(@pages, {id: id})
       @framework.saveConfig() if removedPage.length > 0
       @framework._emitPageRemoved(removedPage[0])
       return removedPage
 
-    getPages: () ->
-      return @pages
+    getPages: (role = "admin") ->
+      @pages.filter (page) ->
+        if page.allowedRoles? then page.allowedRoles.indexOf(role) isnt -1 else true
 
     updatePageOrder: (pageOrder) ->
       assert pageOrder? and Array.isArray pageOrder

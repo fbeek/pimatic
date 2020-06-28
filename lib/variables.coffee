@@ -49,7 +49,7 @@ module.exports = (env) ->
     constructor: (vars, @_device, @_attrName) ->
       super(
         vars, 
-        "#{@_device.id}.#{_attrName}", 
+        "#{@_device.id}.#{@_attrName}", 
         'attribute', 
         @_device.attributes[@_attrName].unit, 
         yes
@@ -58,7 +58,7 @@ module.exports = (env) ->
 
     _addListener: () ->
       @_device.on(@_attrName, @_attrListener = (value) => @_setValue(value) )
-      @_device.on('change', @_deviceChangeListener = (newDevice) =>
+      @_device.on('changed', @_deviceChangedListener = (newDevice) =>
         if newDevice.hasAttribute(@_attrName)
           @unit = newDevice.attributes[@_attrName].unit
           @_removeListener()
@@ -67,14 +67,14 @@ module.exports = (env) ->
         else
           @_vars._removeDeviceAttributeVariable(@name)
       )
-      @_device.on('destroy', @_deviceDestroyListener = =>
+      @_device.on('destroyed', @_deviceDestroyedListener = =>
         @_vars._removeDeviceAttributeVariable(@name)
       )
 
     _removeListener: () ->
       @_device.removeListener(@_attrName, @_attrListener)
-      @_device.removeListener("change", @_deviceChangeListener)
-      @_device.removeListener("destroy", @_deviceDestroyListener)
+      @_device.removeListener("changed", @_deviceChangedListener)
+      @_device.removeListener("destroyed", @_deviceDestroyedListener)
       
     getUpdatedValue: (varsInEvaluation = {}) -> 
       return @_device.getUpdatedAttributeValue(@_attrName, varsInEvaluation)
@@ -158,20 +158,50 @@ module.exports = (env) ->
     variables: {}
     functions: {
       min:
+        description: """
+          Returns the lowest-valued number of the numeric expressions
+          passed to it. If any parameter isn't a number and can't be
+          converted into one the "null" value is returned.
+        """
         args:
           numbers:
+            description: """
+              Zero or more numeric expressions among which the
+              lowest value will be selected and returned. If no expression
+              is provided the null value is returned
+            """
             type: "number"
             multiple: yes
         exec: (args...) -> _.reduce(_.map(args, parseFloat), (a, b) -> Math.min(a,b) )
       max:
+        description: """
+          Returns the highest-valued number of the numeric expressions
+          passed to it. If any parameter isn't a number and can't be
+          converted into one the "null" value is returned
+        """
         args:
           numbers:
+            description: """
+              Zero or more numeric expressions among which the
+              highest value will be selected and returned. If no expression
+              is provided the null value is returned
+            """
             type: "number"
             multiple: yes
         exec: (args...) -> _.reduce(_.map(args, parseFloat), (a, b) -> Math.max(a,b) )
       avg:
+        description: """
+          Returns the average (arithmetic mean) for the numeric
+          expressions passed to it. If any parameter isn't a number
+          and can't be converted into one the "null" value is returned
+        """
         args:
           numbers:
+            description: """
+              Zero or more numeric expressions among which the
+              average is calculated. If no expression
+              is provided the null value is returned
+            """
             type: "number"
             multiple: yes
         exec: (args...) ->  _.reduce(_.map(args, parseFloat), (a, b) -> a+b) / args.length    
@@ -185,6 +215,83 @@ module.exports = (env) ->
           minf = parseFloat(min)
           maxf = parseFloat(max)
           return Math.floor( Math.random() * (maxf+1-minf) ) + minf
+      pow:
+        description: "Returns the base to the exponent power"
+        args:
+          base:
+            description: "A numeric expression for base number"
+            type: "number"
+          exponent:
+            description: "A numeric expression for the exponent. If omitted exponent 2 is applied"
+            type: "number"
+            optional: yes
+        exec: (base, exponent=2) ->
+          return Math.pow(base, exponent)
+      abs:
+        description: """
+          Returns the absolute value of a number
+        """
+        args:
+          x:
+            description: "A numeric expression"
+            type: "number"
+        exec: (x) ->
+          return Math.abs(x)
+      sign:
+        description: """
+          Returns the sign of the value evaluated from the given
+          numeric expression, indicating whether
+          the number is positive (1), negative (-1) or zero (0)
+        """
+        args:
+          x:
+            description: "A numeric expression"
+            type: "number"
+        exec: (x) ->
+          return Math.sign(x)
+      sqrt:
+        description: "Returns the square root of a number"
+        args:
+          x:
+            description: "A numeric expression"
+            type: "number"
+        exec: (x) ->
+          return Math.sqrt(x)
+      cos:
+        description: "Returns the cosine of a number"
+        args:
+          x:
+            description: "A numeric expression for the radians"
+            type: "number"
+        exec: (x) ->
+          return Math.cos(x)
+      acos:
+        description: """
+          Returns the arccosine (in radians) of a number
+          if it's between -1 and 1; otherwise, NaN
+        """
+        args:
+          x:
+            description: "A numeric expression"
+            type: "number"
+        exec: (x) ->
+          return Math.acos(x)
+      log:
+        description: """
+          Returns the logarithm for a given
+          number and base. If no base is provided,
+          the logarithmus naturalis (base e) is assumed.
+        """
+        args:
+          x:
+            description: "A numeric expression"
+            type: "number"
+          base:
+            description: "A numeric expression"
+            type: "number"
+            optional: yes
+        exec: (x, base) ->
+          return Math.log(x) / if base? then Math.log(base) else 1
       round:
         args:
           number:
@@ -192,10 +299,8 @@ module.exports = (env) ->
           decimals:
             type: "number"
             optional: yes
-        exec: (value, decimals) -> 
-          unless decimals?
-            decimals = 0
-          multiplier = Math.pow(10, decimals)
+        exec: (value, decimals) ->
+          multiplier = Math.pow(10, decimals ? 0)
           return Math.round(value * multiplier) / multiplier
       roundToNearest:
         args:
@@ -207,6 +312,22 @@ module.exports = (env) ->
           steps = String(steps)
           decimals = (if steps % 1 != 0 then steps.substr(steps.indexOf(".") + 1).length else 0)
           return Number((Math.round(number / steps) * steps).toFixed(decimals))
+      trunc:
+        description: """
+          Returns the given number truncated at at the given decimal
+          place. If the decimal place is omitted or the value 0 is set, the
+          integer part is returned by removing any fractional digits. Note, this
+          function is equivalent to symmetrical rounding towards zero.
+        """
+        args:
+          number:
+            type: "number"
+          decimals:
+            type: "number"
+            optional: yes
+        exec: (value, decimals) ->
+          multiplier = Math.pow(10, decimals ? 0)
+          return Math.trunc(value * multiplier) / multiplier
       timeFormat:
         args:
           number:
@@ -242,6 +363,36 @@ module.exports = (env) ->
             type: "string"
             optional: yes
         exec: (format) -> (new Date()).format(if format? then format else 'YYYY-MM-DD hh:mm:ss')
+      diffDate:
+        description: """
+          Returns the difference between to given date strings
+          in milliseconds. Optionally, a format string can be
+          provided to return the difference in "seconds",
+          "minutes", "hours", "days". In this case the result is a real
+          number (float) is returned.
+        """
+        args:
+          startDate:
+            type: "string"
+            optional: no
+          endDate:
+            type: "string"
+            optional: no
+          format:
+            type: "string"
+            optional: yes
+        exec: (startDate, endDate, format) ->
+          diff = Date.parse(endDate) - Date.parse(startDate)
+          switch format
+            when "seconds"
+              diff = diff / 1000
+            when "minutes"
+              diff = diff / 1000 / 60
+            when "hours"
+              diff = diff / 1000 / 60 / 60
+            when "days"
+              diff = diff / 1000 / 60 / 60 / 24
+          return diff
       formatNumber:
         args:
           number:
@@ -254,24 +405,121 @@ module.exports = (env) ->
             optional: yes
         exec: (number, decimals, unit) ->
           unless unit?
-            info = humanFormat.raw(number, unit: this.units[0] )
-            formated = (if decimals? then Number(info.num) else info.num)
-            return "#{formated}#{info.prefix}#{info.unit}"
+            unit = this.units[0]
+            info = humanFormat.raw(number, unit: unit)
+            formatted = (if decimals? then Number(info.value).toFixed(decimals) else info.value)
+            return "#{formatted}#{info.prefix}#{unit}"
           else
             unless decimals?
               decimals = 2
-            formated = Number(number).toFixed(decimals)
-            return "#{formated}#{unit}"
+            formatted = Number(number).toFixed(decimals)
+            return "#{formatted}#{unit}"
+      hexString:
+        description: """
+          Converts a given number to a hex string
+        """
+        args:
+          number:
+            description: """
+              The input number. Negative numbers will be treated as 32-bit
+              signed integers. Thus, numbers smaller than -2147483648 will
+              be cut off which is due to limitation of using bitwise operators
+              in JavaScript. Positive integers will be handled up to 53-bit
+              as JavaScript uses IEEE 754 double-precision floating point
+              numbers, internally
+            """
+            type: "number"
+          padding:
+            description: """
+              Specifies the (minimum) number of digits the resulting string
+              shall contain. The string will be padded by prepending leading
+              "0" digits, accordingly. By default, padding is set to 0 which
+              means no padding is performed
+            """
+            type: "number"
+            optional: yes
+          prefix:
+            description: """
+              Specifies a prefix string which will be prepended to the
+              resulting hex number. By default, no prefix is set
+            """
+            type: "string"
+            optional: yes
+        exec: (number, padding=0, prefix="") ->
+          try
+            padding = Math.max(Math.min(padding, 10), 0)
+            hex = Number(if number < 0 then number >>> 0 else number).toString(16).toUpperCase()
+            if hex.length < padding
+              hex = Array(padding + 1 - hex.length).join('0') + hex
+            return prefix + hex
+          catch error
+            env.logger.error "Error in hexString expression: #{error.message}"
+            throw error
+      subString:
+        description: """
+            Returns the substring of the given string matching the given regular expression
+            and flags. If the global flag is used the resulting substring is a concatenation
+            of all matches. If the expression contains capture groups the group matches will
+            be concatenated to provide the resulting substring. If there is no match the
+            empty string is returned
+        """
+        args:
+          string:
+            description: """
+              The input string which is a string expression which may also contain variable
+              references and function calls
+            """
+            type: "string"
+          expression:
+            description: "A string value which may contain a regular expression"
+            type: "string"
+          flags:
+            description: """
+              A string with flags for a regular expression: g: global match,
+              i: ignore case
+            """
+            type: "string"
+            optional: yes
+        exec: (string, expression, flags) ->
+          try
+            matchResult = string.match new RegExp(expression, flags)
+          catch error
+            env.logger.error "Error in subString expression: #{error.message}"
+            throw error
+
+          if matchResult?
+            if flags? and flags.includes('g')
+             # concatenate all global matches
+              _.reduce(matchResult, (fullMatch, val) -> fullMatch = fullMatch + val)
+            else
+              # concatenate all matched capture groups (if any) or prompt the match result
+              if _.isString matchResult[1]
+                matchResult.shift()
+                _.reduce(matchResult, (fullMatch, val) ->
+                  if _.isString val then fullMatch = fullMatch + val)
+              else
+                matchResult[0]
+          else
+            env.logger.debug "subString expression did not match"
+            return ""
     }
 
+    inited: false
+
     constructor: (@framework, @variablesConfig) ->
-      # For each new device add a variable for every attribute
+      # For each each attribute of a new device add a variable
       @framework.on 'deviceAdded', (device) =>
         for attrName, attr of device.attributes
           @_addVariable(
             new DeviceAttributeVariable(this, device, attrName)
           )
-
+      # For each new attribute of a changed device add a variable
+      @framework.on 'deviceChanged', (device) =>
+        for attrName, attr of device.attributes
+          if not @variables["#{device.id}.#{attrName}"]?
+            @_addVariable(
+              new DeviceAttributeVariable(this, device, attrName)
+            )
     init: () ->
       # Import variables
       setExpressions = []
@@ -293,8 +541,8 @@ module.exports = (env) ->
               @_addVariable(exprVar)
               setExpressions.push( -> 
                 try
-                  exprVar.setToExpression(variable.expression.trim()) 
-                catch
+                  exprVar.setToExpression(variable.expression.trim())
+                catch e
                   env.logger.error(
                     "Error parsing expression variable #{variable.name}:", e.message
                   )
@@ -317,7 +565,15 @@ module.exports = (env) ->
             )
 
       setExpr() for setExpr in setExpressions
-          
+      @inited = true
+      @emit 'init'
+
+    waitForInit: () ->
+      return new Promise( (resolve) =>
+        if @inited then return resolve()
+        @once('init', resolve)
+      )
+
     _addVariable: (variable) ->
       assert variable instanceof Variable
       assert (not @variables[variable.name]?)
@@ -490,7 +746,7 @@ module.exports = (env) ->
     isAVariable: (token) -> token.length > 0 and token[0] is '$'
 
     extractVariables: (tokens) ->
-      return (vars = t.substring(1) for t in tokens when @isAVariable(t))
+      return (vars = (t.substring(1) for t in tokens when @isAVariable(t)))
 
     notifyOnChange: (tokens, listener) ->
       variablesInExpr = @extractVariables(tokens)

@@ -3,7 +3,7 @@ Matcher/Parser helper for predicate and action strings
 =================
 ###
 
-__ = require("i18n").__
+__ = require("i18n-pimatic").__
 Promise = require 'bluebird'
 S = require 'string'
 assert = require 'cassert'
@@ -701,7 +701,7 @@ class Matcher
       assert m instanceof Matcher
       matches.push m
     # Get the longest match.
-    next = _.max(matches, (m) => 
+    next = _.maxBy(matches, (m) =>
       if m.input? then m.prevInput.length else 0
     )
     return next

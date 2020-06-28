@@ -11,6 +11,7 @@ Promise = require 'bluebird'
 # Setup the environment
 env = { logger: require './lib/logger' }
 env.api = require('./lib/api')
+env.milliseconds = require('./lib/milliseconds')
 env.users = require('./lib/users') env
 env.devices = require('./lib/devices') env
 env.matcher = require './lib/matcher'
@@ -24,7 +25,7 @@ env.groups = require('./lib/groups') env
 env.pages = require('./lib/pages') env
 env.require = (args...) -> module.require args...
 
-startup = =>
+startup = (command) =>
   # set the config file to
   configFile = (
     # PIMATIC_CONFIG environment variable if it has been set up
@@ -33,7 +34,7 @@ startup = =>
     else path.resolve __dirname, '../../config.json'
   )
 
-  exit = (code) ->
+  env.exit = exit = (code) ->
     env.logger.info "exiting..."
     if process.logStream?
       # close logstream first
@@ -71,7 +72,7 @@ startup = =>
     unless err.silent
       trace = (if err.__trace? then err.__trace.toString().replace('Error: ', '\n') else '')
       env.logger.error(
-        "A uncaught exception occured: #{err.stack}#{trace}\n
+        "An uncaught exception occurred: #{err.stack}#{trace}\n
          This is most probably a bug in pimatic or in a module, please report it!"
       )
     if initComplete
@@ -98,8 +99,12 @@ startup = =>
       onKill = ->
         framework.destroy().then( -> exit(0) )
 
-      process.on('SIGINT', onKill)
-      process.on('SIGTERM', onKill)
+      if command is "install"
+        console.log("killing")
+        exit(0)
+      else
+        process.on('SIGINT', onKill)
+        process.on('SIGTERM', onKill)
 
     )
 

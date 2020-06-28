@@ -2,8 +2,9 @@ pimatic
 =======
 
 [![Build Status](https://travis-ci.org/pimatic/pimatic.png?branch=master)](https://travis-ci.org/pimatic/pimatic)
-[![NPM version](https://badge.fury.io/js/pimatic.png)](http://badge.fury.io/js/pimatic)
-[![Ready](https://badge.waffle.io/pimatic/pimatic.png?label=ready&title=Ready)](https://waffle.io/pimatic/pimatic)
+[![NPM version](https://img.shields.io/npm/v/pimatic.png)](http://badge.fury.io/js/pimatic)
+[![Mentioned in Awesome SmartHome](https://awesome.re/mentioned-badge.svg)](https://github.com/pfalcon/awesome-smarthome#notable-opensource-projects)
+
 
 pimatic is a home automation framework that runs on [node.js](http://nodejs.org). It provides a 
 common extensible platform for home control and automation tasks.  
@@ -27,13 +28,13 @@ Screenshots
 Getting Started
 ------------
 
-[Install instruction](http://pimatic.org/guide/getting-started/installation/) can be found 
-on [pimatic.org](http://pimatic.org/). If you need any help, [ask at the forum](http://forum.pimatic.org).
+[Installation instructions](http://pimatic.org/guide/getting-started/installation/) can be found 
+on [pimatic.org](http://pimatic.org/). If you need any help, [please ask at the forum](http://forum.pimatic.org).
 
 Donation
 --------
 
-Happy with pimatic and using it everyday? Consider a donation to support development and keeping the website and forum up: [![Gittip donate button](http://img.shields.io/gittip/sweetpi.png)](https://www.gittip.com/sweetpi/ "Donate weekly to this project using Gittip")
+Happy with pimatic and using it every day? Consider a donation to support development and keeping the website and forum up: 
 [![PayPal donate button](http://img.shields.io/paypal/donate.png?color=blue)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=KCVVRY4243JS6 "Donate once-off to this project using Paypal")
 
 We promise, that pimatic will always be free to use and its code be open sourced.
@@ -64,11 +65,11 @@ Extensions and Hacking
 ----------------------
 The framework is built to be extendable by plugins. If you have devices that are currently not 
 supported please add a plugin for your devices. 
-As well, if you have a nice Ideas for plugins or need support for specials devices you are
-welcome to create a issue or submit a patch.
+As well, if you have nice ideas for plugins or need support for special devices you are
+welcome to create an issue or submit a patch.
 
 For plugin development take a look at the 
-[development guide](http://pimatic.org/guide/development/required-skills-readings/) and
+[development guide](https://pimatic.teamemo.com/Development) and
 [plugin template](https://github.com/pimatic/pimatic-plugin-template).
 
 Feel free to ask development questions at the 
@@ -78,7 +79,8 @@ Feel free to ask development questions at the
 Copyright / License
 -------------------
 
-    Copyright (C) 2014 Oliver Schneider <oliverschneider89+sweetpi@gmail.com>
+    Copyright (C) 2014-2019 Oliver Schneider <oliverschneider89+sweetpi@gmail.com>
+    and contributors
 
 
     pimatic is free software: you can redistribute it and/or modify

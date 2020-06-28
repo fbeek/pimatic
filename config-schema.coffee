@@ -56,7 +56,11 @@ module.exports = {
             hostname:
               description: "The hostname of the HTTP-server"
               type: "string"
-              default: "" # If is empty then listen to all ip4Adresses
+              default: "" # If is empty then listen to all ip4 addresses
+            socket:
+              description: "The UNIX Socket of the HTTP-server"
+              type: "string"
+              default: "" # If empty use hostname + port instead
         httpsServer:
           type: "object"
           properties:
@@ -73,7 +77,7 @@ module.exports = {
             hostname:
               description: "The hostname of the HTTPS-server"
               type: "string"
-              default: "" # If is empty then listen to all ip4Adresses
+              default: "" # If is empty then listen to all ip4Addresses
             ###
             Download https://raw.githubusercontent.com/pimatic/pimatic/master/install/ssl-setup
             and run ssl-setup in you pimatic-app dir to generate the necessary key and certificate 
@@ -100,6 +104,17 @@ module.exports = {
               type: "string"
               default: "ca/certs/cacert.crt"
           required: false
+        cors:
+          type: "object"
+          required: false
+          properties:
+            allowedOrigin:
+              description: """The origin allowed for cross-origin accesses.
+                    The item "*" is used to accept all origins.
+                    The empty string is used to deny all cross-origin accesses.
+                    """
+              type: "string"
+              default: ""
         database:
           type: "object"
           properties:
@@ -132,7 +147,14 @@ module.exports = {
                 filename: "pimatic-database.sqlite"
               }
             deviceAttributeLogging:
-              description: "Time to keep attribute values of logged devices in database"
+              description: """
+                Defines time constraints on how attribute value changes of logged devices shall
+                be kept in the database. Constraints will be evaluated sequentially where a
+                subsequent constraint may override the previous one. A constraint can be
+                defined by device id, attribute name, and attribute type. See also
+                <a href='https://forum.pimatic.org/topic/44/database-configuration-howto'>
+                Database configuration howto</a>
+              """
               type: "array"
               default: [ 
                 { 
@@ -152,6 +174,48 @@ module.exports = {
                   expire: '1y' 
                 } 
               ]
+              items:
+                type: "object"
+                properties:
+                  deviceId:
+                    description: """
+                      The deviceId of the logged device or "*" for all devices in the matching
+                      context
+                    """
+                    type: "string"
+                  attributeName:
+                    description: """
+                      The name of the attribute or "*" for all attributes in the matching
+                      context
+                    """
+                    type: "string"
+                  type:
+                    description: """
+                      The type of the attribute mapping, one of: "number", "string", "boolean",
+                      "date", "discrete", "continuous", "*". The default, "*" is used for all
+                      applicable attribute types in the matching context
+                    """
+                    type: "string"
+                    default: "*"
+                  interval:
+                    description: """
+                      A time duration constraint on the minmum time interval between attribute
+                      value changes stored in database. If absent all attribute value changes will
+                      stored in the database. The duration is provided in miliseconds if no unit
+                      is provided. Supported units are: ms, second, seconds, s, minute, minutes,
+                      m, hour, hours, h, day, days, d, year, years, y
+                    """
+                    type: "string"
+                    required: false
+                  expire:
+                    description: """
+                      A time duration constraint on how long attribute values shall be kept in the
+                      database. The duration is provided in miliseconds if no unit is provided.
+                      Supported units are: ms, second, seconds, s, minute, minutes, m, hour, hours,
+                      h, day, days, d, year, years, y
+                    """
+                    type: "string"
+                    required: false
             messageLogging:
               description: "Time to keep logged messages in database"
               type: "array"
@@ -193,6 +257,13 @@ module.exports = {
               type: "boolean"
               default: false
           required: false
+        defaultMaxListeners:
+          description: """
+          The number of listeners which can be registered
+          for any single event (soft limit)
+          """
+          type: "number"
+          default: 200
     pages:
       description: "Array of GUI pages"
       type: "array"
@@ -204,6 +275,13 @@ module.exports = {
             type: "string"
           name:
             type: "string"
+          allowedRoles:
+            description: """
+            The roles allowed for accessing the page. If absent
+            roles are granted access.
+            """
+            type: "array"
+            required: false
           devices:
             type: "array"
             default: []
